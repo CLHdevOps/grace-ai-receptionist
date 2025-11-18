@@ -1,0 +1,1 @@
+az group create -n rg-grace-receptionist -l eastus

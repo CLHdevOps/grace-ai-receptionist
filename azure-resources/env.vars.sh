@@ -1,0 +1,6 @@
+WEBSITES_PORT = 8080
+AZURE_STORAGE_CONNECTION_STRING = <your-connection-string>
+OPENAI_API_KEY = <to fill>
+TWILIO_ACCOUNT_SID = <to fill>
+TWILIO_AUTH_TOKEN = <to fill>
+BLOB_CONTAINER = calls
