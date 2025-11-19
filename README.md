@@ -23,24 +23,38 @@ Grace is a warm, human-sounding AI receptionist designed for nonprofits, ministr
 ### ✅ Real-Time Voice AI
 Grace holds natural phone conversations using OpenAI's realtime speech-to-speech API.
 
+### ✅ Mercy House Website Integration
+Grace automatically fetches and uses real content from the Mercy House Adult & Teen Challenge website to answer questions accurately about:
+- Programs and services
+- Admission process
+- Contact information
+- Mission and values
+
+### ✅ Structured Intake Data Collection
+Grace intelligently collects caller information in a structured JSON format:
+- Name
+- Phone number (auto-captured from Twilio caller ID)
+- City/State
+- Reason for calling
+
+Uses a special "INTAKE:" format to ensure reliable data extraction.
+
 ### ✅ After-Hours Routing
 - **Business hours** → forward calls to the real phone number
 - **After hours** → Grace answers the call
 
-### ✅ Call Recording
-All calls are recorded (WAV) and uploaded to Azure Blob Storage.
+### ✅ Call Recording & Transcript Storage
+All calls generate three files in Azure Blob Storage:
+- `transcript.json` - Complete conversation transcript
+- `intake.json` - Structured caller information
+- `recording.json` - Call metadata (duration, timestamp)
 
-### ✅ Transcript Storage
-Grace's conversation transcript (JSON) is saved to Blob under each CallSid.
-
-### ✅ Intake Capture
-Grace collects:
-- Name
-- Phone number
-- City/State
-- Reason for calling
-
-All data is stored as `intake.json`.
+### ✅ Faith-Aligned Personality
+Grace is designed specifically for faith-based organizations with:
+- Warm, compassionate responses
+- Appropriate mentions of hope, prayer, and restoration
+- Emergency crisis protocols
+- Professional boundaries (no medical/legal advice)
 
 ### ✅ Optional Alerts
 Email/SMS alerts can be sent after every call with Blob links.
@@ -108,56 +122,145 @@ PORT=8080
 
 ### 4. Provision Azure Resources
 
-#### Resource Group
+#### Step 1: Login to Azure
+```bash
+# Login with device code (recommended)
+az login --use-device-code
+
+# Follow the prompts to authenticate
+```
+
+#### Step 2: Register Required Resource Providers
+**Important**: New Azure subscriptions need resource providers registered before creating resources.
+
+```bash
+# Register all required providers
+az provider register --namespace Microsoft.Storage
+az provider register --namespace Microsoft.Web
+az provider register --namespace Microsoft.Insights
+
+# Check registration status (wait until all show "Registered")
+az provider list --query "[?namespace=='Microsoft.Storage' || namespace=='Microsoft.Web' || namespace=='Microsoft.Insights'].{Namespace:namespace, State:registrationState}" -o table
+```
+
+**Note**: Provider registration can take 2-5 minutes. Wait until all show `Registered` before proceeding.
+
+#### Step 3: Create Resource Group
 ```bash
 az group create -n rg-grace -l eastus
 ```
 
-#### Storage Account + Container
+#### Step 4: Create Storage Account + Container
 ```bash
-az storage account create -n <storageacct> -g rg-grace --sku Standard_LRS
-az storage container create --account-name <storageacct> --name calls
+# Create storage account (name must be globally unique, lowercase, 3-24 characters)
+az storage account create -n mercyhouse -g rg-grace --sku Standard_LRS -l eastus
+
+# Get connection string (save this for later)
+az storage account show-connection-string -g rg-grace -n mercyhouse --output tsv
+
+# Create blob container
+az storage container create --account-name mercyhouse --name calls
 ```
 
-#### App Service Plan + Web App
+#### Step 5: Create App Service Plan + Web App
 ```bash
+# Create App Service Plan (use F1 for free tier or B1 for basic)
 az appservice plan create -n asp-grace -g rg-grace --sku B1 --is-linux
-az webapp create -n grace-receptionist -g rg-grace --plan asp-grace --runtime "NODE:20-lts"
+
+# Create Web App with Node.js 20 runtime
+az webapp create -n grace-receptionist-app -g rg-grace --plan asp-grace --runtime "NODE:20-lts"
 ```
 
-#### Add App Settings in Azure Portal
-- `WEBSITES_PORT=8080`
-- `OPENAI_API_KEY`
-- `TWILIO_ACCOUNT_SID`
-- `TWILIO_AUTH_TOKEN`
-- `AZURE_STORAGE_CONNECTION_STRING`
-- `BLOB_CONTAINER=calls`
+**Note**: If you get quota errors, try:
+- Different SKU: `--sku F1` (Free tier)
+- Different region: `-l westus2` or `-l centralus`
+- Request quota increase in Azure Portal
 
-### 5. Provision Twilio
+#### Step 6: Configure App Settings in Azure
+```bash
+# Get your storage connection string
+STORAGE_CONN=$(az storage account show-connection-string -g rg-grace -n mercyhouse --output tsv)
 
-1. Buy a voice-enabled phone number
-   - Twilio Console → Phone Numbers → Buy Number
+# Set all application settings at once
+az webapp config appsettings set \
+  -g rg-grace \
+  -n grace-receptionist-app \
+  --settings \
+    WEBSITES_PORT=8080 \
+    OPENAI_API_KEY="<your-openai-key>" \
+    TWILIO_ACCOUNT_SID="<your-twilio-sid>" \
+    TWILIO_AUTH_TOKEN="<your-twilio-token>" \
+    AZURE_STORAGE_CONNECTION_STRING="$STORAGE_CONN" \
+    BLOB_CONTAINER=calls
+```
 
-2. Set Voice Webhook (initially to localhost via ngrok)
-   - `https://<your-ngrok-url>/voice`
+**Alternative**: Set these manually in Azure Portal → App Service → Configuration → Application Settings
 
-### 6. Run Locally
+### 5. Setup ngrok for Local Testing
+
+**Note**: ngrok allows you to expose your local server to the internet so Twilio can reach it during development.
+
+#### Step 1: Download ngrok
+```bash
+# Download ngrok (will extract to current directory)
+curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -o ngrok.zip
+unzip ngrok.zip
+rm ngrok.zip
+```
+
+#### Step 2: Sign up and authenticate
+1. Create free account at https://dashboard.ngrok.com/signup
+2. Get your auth token from https://dashboard.ngrok.com/get-started/your-authtoken
+3. Configure ngrok:
+```bash
+./ngrok config add-authtoken <your-auth-token>
+```
+
+#### Step 3: Start ngrok tunnel
+```bash
+./ngrok http 8080
+```
+
+Copy the `https://` forwarding URL (e.g., `https://abc123.ngrok.io`) - you'll need this for Twilio.
+
+**Important**: Keep this terminal window open while testing!
+
+### 6. Provision Twilio
+
+#### Step 1: Buy a Phone Number
+1. Go to [Twilio Console](https://console.twilio.com/)
+2. Navigate to **Phone Numbers** → **Manage** → **Buy a number**
+3. Search for a voice-enabled number in your area
+4. Purchase the number
+
+#### Step 2: Configure Voice Webhook
+1. Go to **Phone Numbers** → **Manage** → **Active Numbers**
+2. Click on your purchased phone number
+3. Scroll to **Voice Configuration** section
+4. Under **A CALL COMES IN**:
+   - **Webhook**: `https://your-ngrok-url.ngrok.io/voice` (use your ngrok URL)
+   - **HTTP Method**: `POST`
+5. Click **Save**
+
+**For Production**: Replace ngrok URL with your Azure URL:
+```
+https://grace-receptionist-app.azurewebsites.net/voice
+```
+
+### 7. Run Locally
 
 ```bash
 node server.js
 ```
 
 **Check health:**
-```
-http://localhost:8080/healthz
-```
-
-**(Optional) Test external access:**
 ```bash
-ngrok http 8080
+curl http://localhost:8080/healthz
 ```
 
-### 7. Deploy to Azure
+**Note**: Make sure ngrok is running in a separate terminal so Twilio can reach your local server!
+
+### 8. Deploy to Azure
 
 #### Zip Deploy
 ```bash
@@ -251,18 +354,45 @@ Route by Twilio number ("To" field).
 
 ---
 
-## Grace System Prompt
+## Grace System Prompt & Website Integration
 
-Grace's personality, tone, safety rules, and instructions are stored in code under `GRACE_PROMPT`.
+Grace's personality, tone, safety rules, and instructions are stored in code under `GRACE_PROMPT` (lines 69-121 in [server.js](server.js)).
 
-**Characteristics:**
-- ✅ Warm
-- ✅ Kind
-- ✅ Human-like ("hmm", "uh", soft pauses)
-- ✅ Faith-aligned
-- ✅ Never repeats caller name constantly
-- ❌ No medical advice
-- 🚨 **Emergency protocol**: "Please hang up and call 911…"
+**Key Features:**
+
+### Mercy House Website Scraping
+Grace automatically fetches content from these pages on each call:
+- https://mercyhouseatc.com/
+- https://mercyhouseatc.com/about/
+- https://mercyhouseatc.com/program/
+- https://mercyhouseatc.com/contact/
+
+This gives Grace real, up-to-date information to answer caller questions accurately.
+
+### Personality Traits
+- ✅ Warm, kind, and genuinely caring
+- ✅ Professional but conversational (never stiff)
+- ✅ Faith-aligned - appropriately mentions hope, prayer, and restoration
+- ✅ Human-like speech patterns ("hmm", "okay, I hear you", natural pauses)
+- ✅ Varied phrasing to avoid repetition
+
+### Structured Data Collection
+Grace uses a special **INTAKE:** format to output structured JSON:
+```
+INTAKE: {"name":"John Doe","phone":"+1601XXXXXXX","city":"Brandon","state":"MS","reason":"Asking about admission for a family member"}
+```
+
+This ensures reliable extraction of:
+- Caller's name
+- Phone number (auto-captured from Twilio + confirmed)
+- City and state
+- Short reason for calling
+
+### Safety Rules
+- ❌ No medical, legal, or professional counseling advice
+- 🚨 **Emergency protocol**: "This sounds like an emergency. Please hang up and call 911 right away."
+- ✅ Stays in lane as a receptionist
+- ✅ Never makes up information - says "let me have someone call you back" when uncertain
 
 ---
 

@@ -3,12 +3,56 @@ const express = require('express');
 const ExpressWs = require('express-ws');
 const { BlobServiceClient } = require('@azure/storage-blob');
 const OpenAI = require('openai');
+const WebSocket = require('ws');
 
 const app = express();
 ExpressWs(app);
 
 const PORT = process.env.PORT || 8080;
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); // reserved for future use
+
+/**
+ * Key Mercy House URLs to pull context from.
+ * You can tweak or add more URLs as needed.
+ */
+const MERCY_URLS = [
+  'https://mercyhouseatc.com/',
+  'https://mercyhouseatc.com/about/',
+  'https://mercyhouseatc.com/program/',
+  'https://mercyhouseatc.com/contact/',
+];
+
+/**
+ * Fetch and lightly clean text content from the Mercy House site
+ * so Grace can answer questions based on real info.
+ */
+async function fetchMercyHouseContent() {
+  try {
+    const chunks = [];
+
+    for (const url of MERCY_URLS) {
+      const res = await fetch(url);
+      const html = await res.text();
+
+      // Strip scripts/styles and HTML tags, compress whitespace
+      const text = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Limit per-page chunk to keep instructions reasonable in size
+      chunks.push(`From ${url}:\n${text.slice(0, 2000)}`);
+    }
+
+    return chunks.join('\n\n');
+  } catch (err) {
+    console.error('Error fetching Mercy House content:', err);
+    // If we fail to fetch, return empty string so session still works
+    return '';
+  }
+}
 
 // Azure Blob Storage setup
 const blobServiceClient = BlobServiceClient.fromConnectionString(
@@ -22,29 +66,57 @@ const containerClient = blobServiceClient.getContainerClient(
 const sessions = new Map();
 
 // Grace's system prompt
-const GRACE_PROMPT = `You are Grace, a warm and caring AI receptionist for a nonprofit organization.
+const GRACE_PROMPT = `You are Grace, a warm and caring AI receptionist for Mercy House Adult & Teen Challenge in Mississippi.
 
 Your personality:
 - Warm, kind, and genuinely caring
-- Professional but conversational
-- Faith-aligned and compassionate
-- Use natural human speech patterns like "hmm", "uh", soft pauses
-- Never sound robotic or overly formal
+- Professional but conversational, never stiff
+- Faith-aligned and compassionate; it's ok to gently mention hope, prayer, and that God can restore lives
+- Use natural human speech patterns: small pauses, "hmm", "okay, I hear you", etc.
+- Vary your phrasing so you don't sound repetitive or robotic
 
-Your responsibilities:
-- Greet callers warmly
-- Collect their information: name, phone number, city/state, and reason for calling
-- Listen actively and show empathy
-- Keep the conversation natural - don't repeat the caller's name constantly
-- Be helpful and reassuring
+Your mission on each call:
+- Greet callers warmly and put them at ease.
+- Answer questions about Mercy House using ONLY:
+  - What the caller tells you
+  - The information provided from the Mercy House website (you will see it in your system context)
+- Never make up facts. If you're not sure, say something like:
+  "I’m not completely sure on that specific detail, but I can have someone from Mercy House call you back with a clear answer."
+- Ultimately, your goal is to collect callback details so a real person can follow up.
 
-Important safety rules:
-- You do NOT provide medical advice
-- For emergencies, immediately say: "This sounds like an emergency. Please hang up and call 911 right away."
-- Stay within your role as a receptionist - don't pretend to be a doctor, lawyer, or counselor
+Information you must collect before the call ends:
+- Caller’s name
+- Best phone number
+- City and state
+- Short reason for calling (e.g. needing help, calling for a loved one, donation, volunteering, etc.)
 
-Example greeting:
-"Hi, this is Grace. I'm here to help you. How are you doing today?"
+Very important: Once you feel you have all of that information, you MUST say exactly ONE line that starts with:
+INTAKE: {JSON}
+
+Where {JSON} is a single-line JSON object with these keys:
+- name
+- phone
+- city
+- state
+- reason
+
+Example (do NOT say "example" out loud, just follow this format when it’s real):
+INTAKE: {"name":"John Doe","phone":"+1601XXXXXXX","city":"Brandon","state":"MS","reason":"Asking about admission for a family member"}
+
+Do NOT read the word "INTAKE" out loud as part of the conversation; speak naturally to the caller, but make sure you still send that machine-readable line.
+
+Conversation style:
+- Start with something like:
+  "Hi, this is Grace with Mercy House. I’m here to help. How are you doing today?"
+- Listen actively and respond with empathy.
+- Don’t rush to collect info; let them talk, then gently guide toward the info you need.
+- Don’t repeat their name constantly; use it occasionally and naturally.
+
+Safety rules:
+- You do NOT provide medical, legal, or professional counseling advice.
+- If someone sounds like they are in immediate danger or crisis, say:
+  "This sounds like an emergency. Please hang up and call 911 right away."
+- Stay in your lane as a receptionist. You are here to listen, give basic information, and collect contact details for follow-up.
 
 Be natural, be kind, and truly listen.`;
 
@@ -69,8 +141,9 @@ app.get('/healthz', (req, res) => {
 // Twilio voice webhook
 app.post('/voice', express.urlencoded({ extended: false }), (req, res) => {
   const callSid = req.body.CallSid;
+  const from = req.body.From; // Twilio caller ID
 
-  console.log(`Incoming call: ${callSid}`);
+  console.log(`Incoming call: ${callSid} from ${from}`);
 
   // Optional: Forward to real number during business hours
   // Uncomment and configure as needed
@@ -85,15 +158,44 @@ app.post('/voice', express.urlencoded({ extended: false }), (req, res) => {
   */
 
   // Start Media Stream to WebSocket for Grace to handle
+  // Include caller number as a custom parameter so we can pre-fill intake.phone
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://${req.headers.host}/media-stream" />
+    <Stream url="wss://${req.headers.host}/media-stream">
+      <Parameter name="from" value="${from}" />
+    </Stream>
   </Connect>
 </Response>`;
 
   res.type('text/xml').send(twiml);
 });
+
+/**
+ * Parse an "INTAKE: {json}" line from Grace into the intakeData object.
+ */
+function updateIntakeFromText(text, intakeData) {
+  if (!text.startsWith('INTAKE:')) return;
+
+  try {
+    // Strip the "INTAKE:" prefix and trim
+    const jsonPart = text.slice('INTAKE:'.length).trim();
+
+    // Parse JSON
+    const parsed = JSON.parse(jsonPart);
+
+    // Safely copy known fields if present
+    intakeData.name = parsed.name ?? intakeData.name;
+    intakeData.phone = parsed.phone ?? intakeData.phone;
+    intakeData.city = parsed.city ?? intakeData.city;
+    intakeData.state = parsed.state ?? intakeData.state;
+    intakeData.reason = parsed.reason ?? intakeData.reason;
+
+    console.log('Updated intake data from INTAKE line:', intakeData);
+  } catch (err) {
+    console.error('Failed to parse INTAKE line:', err, 'Raw text:', text);
+  }
+}
 
 // WebSocket endpoint for Twilio Media Stream
 app.ws('/media-stream', async (ws, req) => {
@@ -109,7 +211,7 @@ app.ws('/media-stream', async (ws, req) => {
     phone: null,
     city: null,
     state: null,
-    reason: null
+    reason: null,
   };
 
   // Handle incoming messages from Twilio
@@ -118,19 +220,26 @@ app.ws('/media-stream', async (ws, req) => {
       const msg = JSON.parse(message);
 
       switch (msg.event) {
-        case 'start':
+        case 'start': {
           callSid = msg.start.callSid;
           streamSid = msg.start.streamSid;
-          console.log(`Stream started: ${streamSid} for call ${callSid}`);
 
-          // Initialize session
+          // Optional: pre-fill phone from Twilio custom parameter
+          const fromNumber = msg.start.customParameters?.from || null;
+          if (fromNumber) {
+            intakeData.phone = fromNumber;
+          }
+
+          console.log(`Stream started: ${streamSid} for call ${callSid} from ${fromNumber}`);
+
+          // Initialize session; store references so they stay updated
           sessions.set(callSid, {
             callSid,
             streamSid,
-            audioBuffer: [],
-            transcript: [],
-            intakeData: { ...intakeData },
-            startTime: new Date()
+            audioBuffer,
+            transcript,
+            intakeData,
+            startTime: new Date(),
           });
 
           // Connect to OpenAI Realtime API
@@ -138,32 +247,59 @@ app.ws('/media-stream', async (ws, req) => {
             'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
             {
               headers: {
-                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'realtime=v1'
-              }
+                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+                'OpenAI-Beta': 'realtime=v1',
+              },
             }
           );
 
-          openAiWs.on('open', () => {
+          openAiWs.on('open', async () => {
             console.log('Connected to OpenAI Realtime API');
 
-            // Configure session
-            openAiWs.send(JSON.stringify({
-              type: 'session.update',
-              session: {
-                modalities: ['text', 'audio'],
-                instructions: GRACE_PROMPT,
-                voice: 'alloy',
-                input_audio_format: 'g711_ulaw',
-                output_audio_format: 'g711_ulaw',
-                turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.5,
-                  prefix_padding_ms: 300,
-                  silence_duration_ms: 500
-                }
-              }
-            }));
+            // Fetch Mercy House website content to give Grace real context
+            const mercyContext = await fetchMercyHouseContent();
+
+            // Build instructions with website reference data appended
+            const fullInstructions = `${GRACE_PROMPT}
+
+Below is reference information from the Mercy House Adult & Teen Challenge website.
+Use this ONLY as background knowledge to answer questions.
+Do NOT read this text out loud or mention that you can "see the website".
+
+${mercyContext}`;
+
+            // Configure session for speech-to-speech
+            openAiWs.send(
+              JSON.stringify({
+                type: 'session.update',
+                session: {
+                  modalities: ['text', 'audio'],
+                  instructions: fullInstructions,
+                  voice: 'alloy',
+                  input_audio_format: 'g711_ulaw',
+                  output_audio_format: 'g711_ulaw',
+                  turn_detection: {
+                    type: 'server_vad',
+                    threshold: 0.5,
+                    prefix_padding_ms: 300,
+                    silence_duration_ms: 500,
+                  },
+                },
+              })
+            );
+
+            // Send an initial greeting request to Grace
+            // This makes Grace speak first instead of waiting for the caller
+            console.log('Requesting initial greeting from Grace');
+            openAiWs.send(
+              JSON.stringify({
+                type: 'response.create',
+                response: {
+                  modalities: ['text', 'audio'],
+                  instructions: 'Greet the caller warmly as instructed in your system prompt.',
+                },
+              })
+            );
           });
 
           openAiWs.on('message', (data) => {
@@ -174,31 +310,40 @@ app.ws('/media-stream', async (ws, req) => {
               case 'response.audio.delta':
                 // Send audio back to Twilio
                 if (response.delta) {
-                  ws.send(JSON.stringify({
-                    event: 'media',
-                    streamSid: streamSid,
-                    media: {
-                      payload: response.delta
-                    }
-                  }));
+                  ws.send(
+                    JSON.stringify({
+                      event: 'media',
+                      streamSid: streamSid,
+                      media: {
+                        payload: response.delta,
+                      },
+                    })
+                  );
                 }
                 break;
 
               case 'response.audio_transcript.done':
-              case 'conversation.item.created':
-                // Log transcript
-                if (response.transcript || response.item?.formatted?.transcript) {
-                  const text = response.transcript || response.item.formatted.transcript;
+              case 'conversation.item.created': {
+                const text =
+                  response.transcript || response.item?.formatted?.transcript;
+                if (text) {
                   transcript.push({
                     role: response.role || 'assistant',
-                    text: text,
-                    timestamp: new Date().toISOString()
+                    text,
+                    timestamp: new Date().toISOString(),
                   });
+
+                  // Try to extract intake data if this is the special INTAKE line
+                  updateIntakeFromText(text, intakeData);
                 }
                 break;
+              }
 
               case 'error':
                 console.error('OpenAI error:', response.error);
+                break;
+
+              default:
                 break;
             }
           });
@@ -212,16 +357,19 @@ app.ws('/media-stream', async (ws, req) => {
           });
 
           break;
+        }
 
         case 'media':
           // Forward audio to OpenAI
           if (openAiWs && openAiWs.readyState === WebSocket.OPEN) {
             audioBuffer.push(msg.media.payload);
 
-            openAiWs.send(JSON.stringify({
-              type: 'input_audio_buffer.append',
-              audio: msg.media.payload
-            }));
+            openAiWs.send(
+              JSON.stringify({
+                type: 'input_audio_buffer.append',
+                audio: msg.media.payload,
+              })
+            );
           }
           break;
 
@@ -239,6 +387,9 @@ app.ws('/media-stream', async (ws, req) => {
           // Clean up session
           sessions.delete(callSid);
           break;
+
+        default:
+          break;
       }
     } catch (error) {
       console.error('Error processing message:', error);
@@ -254,7 +405,12 @@ app.ws('/media-stream', async (ws, req) => {
 
     if (callSid && sessions.has(callSid)) {
       const session = sessions.get(callSid);
-      await saveCallData(callSid, session.audioBuffer, session.transcript, session.intakeData);
+      await saveCallData(
+        callSid,
+        session.audioBuffer,
+        session.transcript,
+        session.intakeData
+      );
       sessions.delete(callSid);
     }
   });
@@ -268,38 +424,37 @@ async function saveCallData(callSid, audioBuffer, transcript, intakeData) {
     const prefix = `calls/${callSid}/`;
 
     // Save transcript
-    const transcriptBlob = containerClient.getBlockBlobClient(`${prefix}transcript.json`);
-    await transcriptBlob.upload(
-      JSON.stringify(transcript, null, 2),
-      Buffer.byteLength(JSON.stringify(transcript, null, 2)),
-      {
-        blobHTTPHeaders: { blobContentType: 'application/json' }
-      }
+    const transcriptJson = JSON.stringify(transcript, null, 2);
+    const transcriptBlob = containerClient.getBlockBlobClient(
+      `${prefix}transcript.json`
     );
+    await transcriptBlob.upload(transcriptJson, Buffer.byteLength(transcriptJson), {
+      blobHTTPHeaders: { blobContentType: 'application/json' },
+    });
 
     // Save intake data
+    const intakeJson = JSON.stringify(intakeData, null, 2);
     const intakeBlob = containerClient.getBlockBlobClient(`${prefix}intake.json`);
-    await intakeBlob.upload(
-      JSON.stringify(intakeData, null, 2),
-      Buffer.byteLength(JSON.stringify(intakeData, null, 2)),
-      {
-        blobHTTPHeaders: { blobContentType: 'application/json' }
-      }
-    );
+    await intakeBlob.upload(intakeJson, Buffer.byteLength(intakeJson), {
+      blobHTTPHeaders: { blobContentType: 'application/json' },
+    });
 
     // Save recording metadata
     const recordingMetadata = {
       callSid,
       duration: audioBuffer.length,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
-    const recordingMetaBlob = containerClient.getBlockBlobClient(`${prefix}recording.json`);
+    const recordingMetaJson = JSON.stringify(recordingMetadata, null, 2);
+    const recordingMetaBlob = containerClient.getBlockBlobClient(
+      `${prefix}recording.json`
+    );
     await recordingMetaBlob.upload(
-      JSON.stringify(recordingMetadata, null, 2),
-      Buffer.byteLength(JSON.stringify(recordingMetadata, null, 2)),
+      recordingMetaJson,
+      Buffer.byteLength(recordingMetaJson),
       {
-        blobHTTPHeaders: { blobContentType: 'application/json' }
+        blobHTTPHeaders: { blobContentType: 'application/json' },
       }
     );
 
@@ -307,7 +462,6 @@ async function saveCallData(callSid, audioBuffer, transcript, intakeData) {
 
     // Optional: Send notification to staff
     // await sendNotification(callSid, intakeData);
-
   } catch (error) {
     console.error('Error saving call data:', error);
   }
@@ -315,9 +469,7 @@ async function saveCallData(callSid, audioBuffer, transcript, intakeData) {
 
 // Optional: Send notification function (implement as needed)
 async function sendNotification(callSid, intakeData) {
-  // TODO: Implement email/SMS notification
-  // Use SendGrid, Twilio SMS, or other service
-  console.log(`Notification would be sent for call ${callSid}`);
+  console.log(`Notification would be sent for call ${callSid}`, intakeData);
 }
 
 // Start server
