@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(test:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(node server-voicelive.js:*)",
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []

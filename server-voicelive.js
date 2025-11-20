@@ -9,6 +9,9 @@ ExpressWs(app);
 
 const PORT = process.env.PORT || 8080;
 
+// Debug logging toggle - set to true to enable verbose logging
+const DEBUG = process.env.DEBUG_VOICELIVE === 'true' || false;
+
 /**
  * Key Mercy House URLs to pull context from.
  * You can tweak or add more URLs as needed.
@@ -66,9 +69,13 @@ const sessions = new Map();
 // Grace's system prompt
 const GRACE_PROMPT = `You are Grace, a warm, caring AI receptionist for Mercy House Adult & Teen Challenge in Mississippi.
 
+Important:
+- You must ALWAYS respond only in English.
+- Never use any other language, even for greetings or short phrases.
+- If a caller speaks another language, gently say you can only continue in English.
+
 Your speaking style:
-- Speak in natural *spoken* English, not formal written English.
-- Use contractions ("I'm", "we're", "don't") and everyday phrasing.
+- Speak in natural spoken English, not formal written English.
 - Vary sentence length and cadence; avoid monotone or predictable patterns.
 - Add soft, natural pauses ("hmm," "okay…," "I hear you") when appropriate.
 - Keep answers short, warm, and conversational.
@@ -230,6 +237,11 @@ app.ws('/media-stream', async (ws, req) => {
     reason: null,
   };
 
+  // Azure VoiceLive session state
+  let sessionConfigured = false;
+  let sessionReady = false;
+  const audioQueue = [];
+
   // Handle incoming messages from Twilio
   ws.on('message', async (message) => {
     try {
@@ -260,7 +272,7 @@ app.ws('/media-stream', async (ws, req) => {
 
           // Build Azure VoiceLive WebSocket URL
           // Format: wss://<resource-name>.cognitiveservices.azure.com/voice-live/realtime?api-version=2025-10-01&model=<model-name>
-          const azureResourceEndpoint = process.env.AZURE_VOICELIVE_ENDPOINT || 'https://devopsaifoundry.cognitiveservices.azure.com';
+          const azureResourceEndpoint = (process.env.AZURE_VOICELIVE_ENDPOINT || 'https://devopsaifoundry.cognitiveservices.azure.com').replace(/\/+$/, '');
           const voiceLiveApiKey = process.env.AZURE_VOICELIVE_API_KEY;
           const voiceLiveModel = process.env.AZURE_VOICELIVE_MODEL || 'gpt-realtime';
           const apiVersion = process.env.AZURE_VOICELIVE_API_VERSION || '2025-10-01';
@@ -278,14 +290,43 @@ app.ws('/media-stream', async (ws, req) => {
             },
           });
 
+          // Wrap the send method to log all outgoing messages (if DEBUG enabled)
+          const originalSend = voiceLiveWs.send.bind(voiceLiveWs);
+          voiceLiveWs.send = function(data) {
+            if (DEBUG) {
+              console.log('>>> SENDING TO AZURE:', data.substring(0, 200));
+            }
+            return originalSend(data);
+          };
+
           voiceLiveWs.on('open', async () => {
             console.log('Connected to Azure VoiceLive API');
+            console.log('Waiting for session.created event from Azure...');
+          });
 
-            // Fetch Mercy House website content to give Grace real context
-            const mercyContext = await fetchMercyHouseContent();
+          voiceLiveWs.on('message', (data) => {
+            const response = JSON.parse(data);
 
-            // Build instructions with website reference data appended
-            const fullInstructions = `${GRACE_PROMPT}
+            if (DEBUG) {
+              console.log('<<< RECEIVED FROM AZURE:', response.type, JSON.stringify(response).substring(0, 200));
+            }
+
+            // Handle different VoiceLive event types
+            // Based on Python code: SESSION_UPDATED, RESPONSE_AUDIO_DELTA, etc.
+            switch (response.type) {
+              case 'session.created':
+                console.log('VoiceLive session created:', response.session?.id);
+
+                // Now that session is created, configure it
+                if (!sessionConfigured) {
+                  sessionConfigured = true;
+
+                  (async () => {
+                    // Fetch Mercy House website content to give Grace real context
+                    const mercyContext = await fetchMercyHouseContent();
+
+                    // Build instructions with website reference data appended
+                    const fullInstructions = `${GRACE_PROMPT}
 
 Below is reference information from the Mercy House Adult & Teen Challenge website.
 Use this ONLY as background knowledge to answer questions.
@@ -293,83 +334,105 @@ Do NOT read this text out loud or mention that you can "see the website".
 
 ${mercyContext}`;
 
-            // Determine voice configuration (Azure Neural Voice format)
-            const voiceName = process.env.AZURE_VOICELIVE_VOICE || 'DragonHDLatest';
+                    // Determine voice configuration (Azure Neural Voice format)
+                    const voiceName = process.env.AZURE_VOICELIVE_VOICE || 'alloy';
 
-            // Detect voice type based on name pattern
-            // HD voices end with "HDLatest" (e.g., DragonHDLatest, PhoenixHDLatest)
-            // Standard voices follow pattern like "en-US-AvaNeural"
-            const isHDVoice = voiceName.includes('HDLatest');
-            const voiceType = isHDVoice ? 'azure-hd' : 'azure-standard';
+                    // Detect voice type based on name pattern
+                    // HD voices end with "HDLatest" (e.g., EMMA2DragonHDLatest, PhoenixHDLatest)
+                    // Standard voices follow pattern like "en-US-AvaNeural"
+                    // OpenAI voices: alloy, echo, fable, onyx, nova, shimmer
+                    let voiceConfig;
+                    if (voiceName.includes('HDLatest') || voiceName.includes('Neural')) {
+                      // Azure Neural Voice (HD or Standard)
+                      voiceConfig = {
+                        type: 'azure-standard',
+                        name: voiceName,
+                        temperature: 0.8
+                      };
+                    } else {
+                      // OpenAI voice
+                      voiceConfig = {
+                        type: 'openai',
+                        name: voiceName
+                      };
+                    }
 
-            // Configure session for speech-to-speech with Azure Voice Live
-            voiceLiveWs.send(
-              JSON.stringify({
-                type: 'session.update',
-                session: {
-                  modalities: ['text', 'audio'],
-                  instructions: fullInstructions,
+                    // Configure session for speech-to-speech with Azure Voice Live
+                    const sessionUpdateMessage = {
+                      type: 'session.update',
+                      session: {
+                        modalities: ['text', 'audio'],
+                        instructions: fullInstructions,
 
-                  // Voice configuration - Azure Neural Voice format
-                  // Using Emma2 Dragon HD Latest (highest quality Azure voice)
-                  voice: {
-                    name: voiceName,
-                    type: voiceType,
-                    temperature: 0.8  // Match Azure AI Foundry config
-                  },
+                        // Voice configuration - Azure Neural Voice format
+                        voice: voiceConfig,
 
-                  // Audio format - g711_ulaw is natively supported by Azure Voice Live!
-                  // This matches Twilio's format exactly (no transcoding needed)
-                  input_audio_format: 'g711_ulaw',
-                  output_audio_format: 'g711_ulaw',
+                        // Audio format - g711_ulaw is natively supported by Azure Voice Live!
+                        // This matches Twilio's format exactly (no transcoding needed)
+                        input_audio_format: 'g711_ulaw',
+                        output_audio_format: 'g711_ulaw',
 
-                  // Response temperature (matching Azure AI Foundry config: 0.8)
-                  temperature: 0.8,
+                        // Response temperature (matching Azure AI Foundry config: 0.8)
+                        temperature: 0.8,
 
-                  // Speaking rate (matching Azure AI Foundry config: 1.0 = normal)
-                  output_audio_speed: 1.0,
+                        // Azure Semantic VAD - understands meaning and intent, not just silence
+                        // Adjusted for better call quality and less interruptions
+                        turn_detection: {
+                          type: 'azure_semantic_vad',
+                          threshold: 0.5,
+                          prefix_padding_ms: 300,
+                          silence_duration_ms: 500,
+                          interrupt_response: true,
+                          remove_filler_words: true
+                        },
 
-                  // Azure Semantic VAD - understands meaning and intent, not just silence
-                  turn_detection: {
-                    type: 'azure_semantic_vad',
-                    threshold: 0.3,
-                    silence_duration_ms: 200,
-                    interrupt_response: true,
-                    remove_filler_words: true
-                  },
+                        // Audio enhancement features (matching Azure AI Foundry config)
+                        input_audio_noise_reduction: {
+                          type: 'azure_deep_noise_suppression'
+                        },
+                        input_audio_echo_cancellation: {
+                          type: 'server_echo_cancellation'
+                        }
+                      },
+                    };
 
-                  // Audio enhancement features (matching Azure AI Foundry config)
-                  input_audio_noise_reduction: {
-                    type: 'azure_deep_noise_suppression'
-                  },
-                  input_audio_echo_cancellation: {
-                    type: 'server_echo_cancellation'
-                  }
-                },
-              })
-            );
+                    if (DEBUG) {
+                      console.log('Sending session.update:', JSON.stringify(sessionUpdateMessage, null, 2));
+                    }
+                    voiceLiveWs.send(JSON.stringify(sessionUpdateMessage));
 
-            // Send an initial greeting request to Grace
-            console.log('Requesting initial greeting from Grace');
-            voiceLiveWs.send(
-              JSON.stringify({
-                type: 'response.create',
-                response: {
-                  modalities: ['text', 'audio'],
-                  instructions: 'Greet the caller warmly as instructed in your system prompt.',
-                },
-              })
-            );
-          });
+                    // Send an initial greeting request to Grace
+                    console.log('Requesting initial greeting from Grace');
+                    voiceLiveWs.send(
+                      JSON.stringify({
+                        type: 'response.create',
+                        response: {
+                          modalities: ['text', 'audio'],
+                          instructions: 'Greet the caller warmly as instructed in your system prompt.',
+                        },
+                      })
+                    );
+                  })();
+                }
+                break;
 
-          voiceLiveWs.on('message', (data) => {
-            const response = JSON.parse(data);
-
-            // Handle different VoiceLive event types
-            // Based on Python code: SESSION_UPDATED, RESPONSE_AUDIO_DELTA, etc.
-            switch (response.type) {
               case 'session.updated':
                 console.log('VoiceLive session ready:', response.session?.id);
+                sessionReady = true;
+
+                // Flush any queued audio data
+                if (audioQueue.length > 0) {
+                  console.log(`Flushing ${audioQueue.length} queued audio packets`);
+                  audioQueue.forEach(audioData => {
+                    voiceLiveWs.send(
+                      JSON.stringify({
+                        type: 'input_audio_buffer.append',
+                        audio: audioData,
+                      })
+                    );
+                  });
+                  audioQueue.length = 0; // Clear the queue
+                }
                 break;
 
               case 'input_audio_buffer.speech_started':
@@ -412,16 +475,34 @@ ${mercyContext}`;
                 console.log('Response complete');
                 break;
 
+              case 'response.audio_transcript.delta':
+                // Capture transcript deltas to see what Grace is saying
+                if (response.delta) {
+                  console.log('Grace says:', response.delta);
+                }
+                break;
+
               case 'response.audio_transcript.done':
+                // Full transcript available
+                if (response.transcript) {
+                  console.log('Grace full response:', response.transcript);
+                  transcript.push({
+                    role: 'assistant',
+                    text: response.transcript,
+                    timestamp: new Date().toISOString(),
+                  });
+                  updateIntakeFromText(response.transcript, intakeData);
+                }
+                break;
+
               case 'conversation.item.created': {
                 const text =
-                  response.transcript ||
                   response.item?.formatted?.transcript ||
                   response.item?.content?.find(c => c.type === 'text')?.text;
 
                 if (text) {
                   transcript.push({
-                    role: response.role || response.item?.role || 'assistant',
+                    role: response.item?.role || 'assistant',
                     text,
                     timestamp: new Date().toISOString(),
                   });
@@ -431,6 +512,17 @@ ${mercyContext}`;
                 }
                 break;
               }
+
+              case 'response.output_item.added':
+              case 'response.content_part.added':
+              case 'response.content_part.done':
+              case 'response.output_item.done':
+                // These are structural events, just acknowledge them
+                break;
+
+              case 'input_audio_buffer.committed':
+                console.log('User audio committed');
+                break;
 
               case 'error':
                 console.error('Azure VoiceLive error:', response.error);
@@ -458,13 +550,19 @@ ${mercyContext}`;
           if (voiceLiveWs && voiceLiveWs.readyState === WebSocket.OPEN) {
             audioBuffer.push(msg.media.payload);
 
-            // Send audio directly - Azure Voice Live natively supports g711_ulaw!
-            voiceLiveWs.send(
-              JSON.stringify({
-                type: 'input_audio_buffer.append',
-                audio: msg.media.payload,
-              })
-            );
+            // Only send audio if session is ready, otherwise queue it
+            if (sessionReady) {
+              // Send audio directly - Azure Voice Live natively supports g711_ulaw!
+              voiceLiveWs.send(
+                JSON.stringify({
+                  type: 'input_audio_buffer.append',
+                  audio: msg.media.payload,
+                })
+              );
+            } else {
+              // Queue audio until session is ready
+              audioQueue.push(msg.media.payload);
+            }
           }
           break;
 
