@@ -6,7 +6,7 @@ Based on your Azure AI Foundry configuration, here's what you have:
 
 ### Resource Information
 - **Resource Name**: devopsaifoundry
-- **Endpoint**: `https://devopsaifoundry.cognitiveservices.azure.com`
+- **Endpoint**: `your_endpoint`
 - **Region**: eastus2
 - **API Version**: 2025-10-01
 
