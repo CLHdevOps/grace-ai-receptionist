@@ -1,6 +1,30 @@
-# Grace AI Receptionist
+<div align="center">
 
-> After-hours voice assistant for small businesses, nonprofits, and ministries
+```
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   ░██████╗░██████╗░░█████╗░░█████╗░███████╗                 ║
+║   ██╔════╝░██╔══██╗██╔══██╗██╔══██╗██╔════╝                 ║
+║   ██║░░██╗░██████╔╝███████║██║░░╚═╝█████╗░░                 ║
+║   ██║░░╚██╗██╔══██╗██╔══██║██║░░██╗██╔══╝░░                 ║
+║   ╚██████╔╝██║░░██║██║░░██║╚█████╔╝███████╗                 ║
+║   ░╚═════╝░╚═╝░░╚═╝╚═╝░░╚═╝░╚════╝░╚══════╝                 ║
+║                                                               ║
+║             AI Receptionist with a Human Touch                ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+```
+
+### After-hours voice assistant for small businesses, nonprofits, and ministries
+
+[![Azure Voice Live](https://img.shields.io/badge/Azure-Voice%20Live%20API-0078D4?logo=microsoft-azure&logoColor=white)](https://azure.microsoft.com/en-us/products/ai-services/ai-speech)
+[![Twilio](https://img.shields.io/badge/Twilio-Media%20Streams-F22F46?logo=twilio&logoColor=white)](https://www.twilio.com/docs/voice/media-streams)
+[![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+---
+
+</div>
 
 Grace is an AI receptionist powered by **Azure Voice Live API**, **Twilio Media Streams**, and **Azure services**. She provides natural phone conversations using Azure's highest quality HD Neural Voices.
 
