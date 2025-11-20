@@ -1,417 +1,404 @@
 # Grace AI Receptionist
 
-> MVP for an AI receptionist for small businesses.
+> After-hours voice assistant for small businesses, nonprofits, and ministries
 
-## Overview
+Grace is an AI receptionist powered by **Azure Voice Live API**, **Twilio Media Streams**, and **Azure services**. She provides natural phone conversations using Azure's highest quality HD Neural Voices.
 
-**Grace AI Receptionist** is a realtime voice assistant powered by Twilio + OpenAI Realtime API + Azure App Service for after-hours calls.
+## 🌟 Features
 
-Grace is a warm, human-sounding AI receptionist designed for nonprofits, ministries, and service organizations. She answers after-hours calls, speaks naturally (with human-like pauses and fillers), captures caller information, and stores call recordings and transcripts in Azure Blob Storage.
+### ✅ Ultra-Natural Voice
+- **Azure Dragon HD Neural Voice** - Highest quality voice available
+- **Semantic turn detection** - Understands meaning and intent
+- **Deep noise suppression** - Crystal clear audio
+- **Echo cancellation** - Prevents feedback
+- **Automatic filler word removal** - Professional speech ("um", "ah" removed)
 
-### Built With
+### ✅ Real-Time Conversations
+- Speech-to-speech with Azure Voice Live API
+- Natural pauses and emotional expression
+- Context-aware responses
 
-- **Twilio Voice** (Media Streams)
-- **OpenAI GPT-4o Realtime API**
-- **Node.js + WebSockets**
-- **Azure App Service** (Linux)
-- **Azure Blob Storage**
-
----
-
-## Features
-
-### ✅ Real-Time Voice AI
-Grace holds natural phone conversations using OpenAI's realtime speech-to-speech API.
-
-### ✅ Mercy House Website Integration
-Grace automatically fetches and uses real content from the Mercy House Adult & Teen Challenge website to answer questions accurately about:
+### ✅ Website Context Integration
+Grace automatically fetches and uses content from Mercy House website to answer questions about:
 - Programs and services
 - Admission process
 - Contact information
 - Mission and values
 
-### ✅ Structured Intake Data Collection
-Grace intelligently collects caller information in a structured JSON format:
+### ✅ Structured Data Collection
+Grace intelligently collects caller information in JSON format:
 - Name
-- Phone number (auto-captured from Twilio caller ID)
-- City/State
+- Phone number (auto-captured from Twilio)
+- City and State
 - Reason for calling
 
-Uses a special "INTAKE:" format to ensure reliable data extraction.
-
-### ✅ After-Hours Routing
-- **Business hours** → forward calls to the real phone number
-- **After hours** → Grace answers the call
-
-### ✅ Call Recording & Transcript Storage
-All calls generate three files in Azure Blob Storage:
+### ✅ Azure Blob Storage
+All calls generate three files:
 - `transcript.json` - Complete conversation transcript
 - `intake.json` - Structured caller information
 - `recording.json` - Call metadata (duration, timestamp)
 
-### ✅ Faith-Aligned Personality
-Grace is designed specifically for faith-based organizations with:
-- Warm, compassionate responses
-- Appropriate mentions of hope, prayer, and restoration
-- Emergency crisis protocols
-- Professional boundaries (no medical/legal advice)
+---
 
-### ✅ Optional Alerts
-Email/SMS alerts can be sent after every call with Blob links.
+## 📁 Project Structure
+
+```
+grace-ai-receptionist/
+├── src/                          # Source code
+│   ├── server-voicelive.js      # Main server (Azure Voice Live)
+│   └── utils/                    # Utility modules
+│       ├── website-scraper.js   # Website content fetching
+│       ├── intake-parser.js     # Intake data parsing
+│       └── blob-storage.js      # Azure Blob Storage operations
+├── config/                       # Configuration modules
+│   ├── voicelive.config.js      # Azure Voice Live configuration
+│   └── grace.prompt.js          # Grace's personality and instructions
+├── docs/                         # Documentation
+│   ├── FINAL-SETUP-CHECKLIST.md # Quick start guide
+│   ├── AZURE-AI-FOUNDRY-CONFIG.md # Azure AI Foundry configuration
+│   └── ...                       # Additional documentation
+├── azure-resources/              # Azure deployment scripts
+├── server.js                     # Legacy: OpenAI Realtime API version
+├── server-azure.js               # Legacy: Azure OpenAI version
+├── .env.example                  # Environment configuration template
+└── package.json                  # Node.js dependencies
+```
 
 ---
 
-## Architecture Overview
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js 20+
+- Azure AI Foundry or Cognitive Services resource with Voice Live API
+- Twilio account with phone number
+- Azure Storage account (for call recordings)
+
+### Installation
+
+1. **Clone and install**
+   ```bash
+   git clone https://github.com/your-org/grace-ai-receptionist.git
+   cd grace-ai-receptionist
+   npm install
+   ```
+
+2. **Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your credentials (see Configuration section)
+   ```
+
+3. **Run the server**
+   ```bash
+   node src/server-voicelive.js
+   ```
+
+4. **Expose locally (development)**
+   ```bash
+   # In another terminal
+   ngrok http 8080
+   ```
+
+5. **Configure Twilio webhook**
+   - Go to [Twilio Console](https://console.twilio.com/)
+   - Phone Numbers → Manage → Active numbers → Your number
+   - Voice Configuration:
+     - **Webhook URL**: `https://your-ngrok-id.ngrok.io/voice`
+     - **Method**: POST
+   - Save
+
+6. **Call your number and test!**
+
+---
+
+## ⚙️ Configuration
+
+### Required Environment Variables
+
+```bash
+# Azure Voice Live API
+AZURE_VOICELIVE_ENDPOINT=https://your-resource.cognitiveservices.azure.com
+AZURE_VOICELIVE_API_KEY=your_api_key_here
+AZURE_VOICELIVE_MODEL=gpt-realtime
+AZURE_VOICELIVE_VOICE=DragonHDLatest
+
+# Twilio
+TWILIO_ACCOUNT_SID=your_twilio_sid
+TWILIO_AUTH_TOKEN=your_twilio_token
+
+# Azure Storage
+AZURE_STORAGE_CONNECTION_STRING=your_storage_connection_string
+BLOB_CONTAINER=calls
+```
+
+**Where to get credentials:**
+
+| Variable | Location |
+|----------|----------|
+| `AZURE_VOICELIVE_ENDPOINT` | Azure Portal → Your AI Resource → Overview → Endpoint |
+| `AZURE_VOICELIVE_API_KEY` | Azure Portal → Your AI Resource → Keys and Endpoint → KEY 1 |
+| `TWILIO_ACCOUNT_SID` | [Twilio Console](https://console.twilio.com/) → Account Info |
+| `TWILIO_AUTH_TOKEN` | [Twilio Console](https://console.twilio.com/) → Account Info |
+| `AZURE_STORAGE_CONNECTION_STRING` | Azure Portal → Storage Account → Access Keys |
+
+See [.env.example](.env.example) for all configuration options.
+
+### Voice Selection
+
+Azure Voice Live supports multiple voices:
+
+**HD Neural Voices** (Highest quality):
+- `DragonHDLatest` (Emma2) - Female, warm, natural ⭐ **Recommended**
+- `PhoenixHDLatest` - Female, professional
+
+**Standard Neural Voices**:
+- `en-US-AvaNeural` - Female, warm
+- `en-US-JennyNeural` - Female, friendly
+- `en-US-AriaNeural` - Female, expressive
+
+Configure in `.env`:
+```bash
+AZURE_VOICELIVE_VOICE=DragonHDLatest
+```
+
+---
+
+## 🏗️ Architecture
+
+### Modular Design
+
+The project follows best practices with a clean, modular structure:
+
+- **Configuration Layer** (`config/`)
+  - Centralized API configuration
+  - Personality and prompt management
+  - Easy to test and maintain
+
+- **Utility Layer** (`src/utils/`)
+  - Reusable, focused modules
+  - Website scraping
+  - Data parsing
+  - Storage operations
+
+- **Application Layer** (`src/`)
+  - Clean business logic
+  - Minimal coupling
+  - Easy to extend
+
+### Call Flow
 
 ```
 Caller
-   ↓
-Twilio Voice Number
-   ↓ (Webhook /voice)
-Azure App Service (Node.js)
-   • Generates TwiML
-   • Starts Media Stream
-   ↓ (WebSocket)
-OpenAI GPT-4o Realtime
-   • Natural conversation with caller
-   • Text + audio events
-   ↓
-Azure Blob Storage
-   • recording.wav
-   • recording.json
-   • transcript.json
-   • intake.json
+  ↓
+Twilio Phone Number
+  ↓
+Twilio Media Stream (WebSocket, g711_ulaw audio)
+  ↓
+Grace Server (src/server-voicelive.js)
+  ├→ Fetch website content
+  ├→ Connect to Azure Voice Live API
+  ├→ Stream audio bidirectionally
+  └→ Parse intake data
+  ↓
+Azure Blob Storage (save transcript + intake)
 ```
 
 ---
 
-## Requirements
+## 📚 Documentation
 
-- **Node.js 20+**
-- **Azure Subscription** (for App Service + Blob)
-- **Twilio Account** (for phone number)
-- **OpenAI API Key** (for realtime model)
+- **[Quick Start Checklist](docs/FINAL-SETUP-CHECKLIST.md)** - Step-by-step setup
+- **[Azure AI Foundry Config](docs/AZURE-AI-FOUNDRY-CONFIG.md)** - Configuration alignment
+- **[Voice Live Assessment](docs/VOICELIVE-ASSESSMENT.md)** - Technical analysis
+- **[Voice Live Setup](docs/VOICELIVE-SETUP.md)** - Detailed setup guide
 
 ---
 
-## Setup Guide
+## 🔄 Alternative Implementations
 
-### 1. Clone Repository
+Three server implementations for comparison:
 
+| File | Provider | Voice Quality | Use Case |
+|------|----------|---------------|----------|
+| `src/server-voicelive.js` | Azure Voice Live | ⭐⭐⭐⭐⭐ | **Recommended** - Best quality |
+| `server-azure.js` | Azure OpenAI | ⭐⭐⭐⭐ | Azure infrastructure |
+| `server.js` | OpenAI | ⭐⭐⭐ | Original/testing |
+
+Test different versions:
 ```bash
-git clone <your-repo-url>
-cd grace-receptionist
+node src/server-voicelive.js  # Recommended
+node server-azure.js            # Azure OpenAI
+node server.js                  # OpenAI
 ```
 
-### 2. Install Dependencies
+---
+
+## 🎤 Grace's Personality
+
+Grace is configured with a warm, caring personality in [config/grace.prompt.js](config/grace.prompt.js).
+
+**Key characteristics:**
+- **Warm and empathetic** - Kind, caring tone
+- **Natural speech** - Conversational, not scripted
+- **Faith-aligned** - Comfortable with hope and prayer references
+- **Professional boundaries** - No medical/legal advice
+- **Safety-focused** - Emergency protocol for 911 situations
+
+**Customization:**
+Edit `config/grace.prompt.js` to adjust Grace's personality, mission, or response style.
+
+---
+
+## 🚢 Deployment
+
+### Azure App Service
 
 ```bash
-npm install
-```
+# 1. Create Azure resources (if needed)
+cd azure-resources
+./create-rg.sh
+./create-storage.sh
+./create-appservice-webapp.sh
 
-### 3. Create `.env` (Local Development Only)
-
-```bash
-OPENAI_API_KEY=<your key>
-TWILIO_ACCOUNT_SID=<sid>
-TWILIO_AUTH_TOKEN=<token>
-AZURE_STORAGE_CONNECTION_STRING=<connection string>
-BLOB_CONTAINER=calls
-PORT=8080
-```
-
-### 4. Provision Azure Resources
-
-#### Step 1: Login to Azure
-```bash
-# Login with device code (recommended)
-az login --use-device-code
-
-# Follow the prompts to authenticate
-```
-
-#### Step 2: Register Required Resource Providers
-**Important**: New Azure subscriptions need resource providers registered before creating resources.
-
-```bash
-# Register all required providers
-az provider register --namespace Microsoft.Storage
-az provider register --namespace Microsoft.Web
-az provider register --namespace Microsoft.Insights
-
-# Check registration status (wait until all show "Registered")
-az provider list --query "[?namespace=='Microsoft.Storage' || namespace=='Microsoft.Web' || namespace=='Microsoft.Insights'].{Namespace:namespace, State:registrationState}" -o table
-```
-
-**Note**: Provider registration can take 2-5 minutes. Wait until all show `Registered` before proceeding.
-
-#### Step 3: Create Resource Group
-```bash
-az group create -n rg-grace -l eastus
-```
-
-#### Step 4: Create Storage Account + Container
-```bash
-# Create storage account (name must be globally unique, lowercase, 3-24 characters)
-az storage account create -n mercyhouse -g rg-grace --sku Standard_LRS -l eastus
-
-# Get connection string (save this for later)
-az storage account show-connection-string -g rg-grace -n mercyhouse --output tsv
-
-# Create blob container
-az storage container create --account-name mercyhouse --name calls
-```
-
-#### Step 5: Create App Service Plan + Web App
-```bash
-# Create App Service Plan (use F1 for free tier or B1 for basic)
-az appservice plan create -n asp-grace -g rg-grace --sku B1 --is-linux
-
-# Create Web App with Node.js 20 runtime
-az webapp create -n grace-receptionist-app -g rg-grace --plan asp-grace --runtime "NODE:20-lts"
-```
-
-**Note**: If you get quota errors, try:
-- Different SKU: `--sku F1` (Free tier)
-- Different region: `-l westus2` or `-l centralus`
-- Request quota increase in Azure Portal
-
-#### Step 6: Configure App Settings in Azure
-```bash
-# Get your storage connection string
-STORAGE_CONN=$(az storage account show-connection-string -g rg-grace -n mercyhouse --output tsv)
-
-# Set all application settings at once
+# 2. Set environment variables
 az webapp config appsettings set \
-  -g rg-grace \
+  -g rg-grace-receptionist \
   -n grace-receptionist-app \
   --settings \
-    WEBSITES_PORT=8080 \
-    OPENAI_API_KEY="<your-openai-key>" \
-    TWILIO_ACCOUNT_SID="<your-twilio-sid>" \
-    TWILIO_AUTH_TOKEN="<your-twilio-token>" \
-    AZURE_STORAGE_CONNECTION_STRING="$STORAGE_CONN" \
-    BLOB_CONTAINER=calls
+  AZURE_VOICELIVE_ENDPOINT="..." \
+  AZURE_VOICELIVE_API_KEY="..." \
+  # ... other settings
+
+# 3. Deploy
+zip -r app.zip src/ config/ package.json package-lock.json
+az webapp deployment source config-zip \
+  -g rg-grace-receptionist \
+  -n grace-receptionist-app \
+  --src app.zip
 ```
 
-**Alternative**: Set these manually in Azure Portal → App Service → Configuration → Application Settings
-
-### 5. Setup ngrok for Local Testing
-
-**Note**: ngrok allows you to expose your local server to the internet so Twilio can reach it during development.
-
-#### Step 1: Download ngrok
-```bash
-# Download ngrok (will extract to current directory)
-curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -o ngrok.zip
-unzip ngrok.zip
-rm ngrok.zip
-```
-
-#### Step 2: Sign up and authenticate
-1. Create free account at https://dashboard.ngrok.com/signup
-2. Get your auth token from https://dashboard.ngrok.com/get-started/your-authtoken
-3. Configure ngrok:
-```bash
-./ngrok config add-authtoken <your-auth-token>
-```
-
-#### Step 3: Start ngrok tunnel
-```bash
-./ngrok http 8080
-```
-
-Copy the `https://` forwarding URL (e.g., `https://abc123.ngrok.io`) - you'll need this for Twilio.
-
-**Important**: Keep this terminal window open while testing!
-
-### 6. Provision Twilio
-
-#### Step 1: Buy a Phone Number
-1. Go to [Twilio Console](https://console.twilio.com/)
-2. Navigate to **Phone Numbers** → **Manage** → **Buy a number**
-3. Search for a voice-enabled number in your area
-4. Purchase the number
-
-#### Step 2: Configure Voice Webhook
-1. Go to **Phone Numbers** → **Manage** → **Active Numbers**
-2. Click on your purchased phone number
-3. Scroll to **Voice Configuration** section
-4. Under **A CALL COMES IN**:
-   - **Webhook**: `https://your-ngrok-url.ngrok.io/voice` (use your ngrok URL)
-   - **HTTP Method**: `POST`
-5. Click **Save**
-
-**For Production**: Replace ngrok URL with your Azure URL:
+### Update Twilio webhook to production URL:
 ```
 https://grace-receptionist-app.azurewebsites.net/voice
 ```
 
-### 7. Run Locally
+---
+
+## 🧪 Testing
 
 ```bash
-node server.js
-```
-
-**Check health:**
-```bash
+# Health check
 curl http://localhost:8080/healthz
-```
 
-**Note**: Make sure ngrok is running in a separate terminal so Twilio can reach your local server!
+# Run with logging
+node src/server-voicelive.js
 
-### 8. Deploy to Azure
-
-#### Zip Deploy
-```bash
-zip -r app.zip .
-az webapp deployment source config-zip \
-  -g rg-grace \
-  -n grace-receptionist \
-  --src app.zip
-```
-
-#### Point Twilio to Production
-```
-https://grace-receptionist.azurewebsites.net/voice
+# Test with ngrok
+ngrok http 8080
 ```
 
 ---
 
-## Business Hours Routing (Optional)
+## 🔧 Customization
 
-Modify `/voice` route in `server.js`:
+### For Other Organizations
 
-```javascript
-if (isBusinessHours()) {
-  return res.type("text/xml").send(`
-    <Response>
-      <Dial>+1601XXXXXXX</Dial>
-    </Response>
-  `);
-}
-```
-
-**After hours:**
-Return `<Start><Stream>` TwiML (Grace answers)
+1. **Update website URLs**: Edit `src/utils/website-scraper.js`
+2. **Modify system prompt**: Edit `config/grace.prompt.js`
+3. **Adjust intake fields**: Edit `src/utils/intake-parser.js` (if needed)
+4. **Change voice**: Update `.env` → `AZURE_VOICELIVE_VOICE`
+5. **Update Azure resources**: Edit Azure resource names in deployment scripts
 
 ---
 
-## Blob Storage Structure
+## 🐛 Troubleshooting
 
-```
-/calls/<CallSid>/
-  recording.json
-  recording.wav
-  transcript.json
-  intake.json
-```
+### Common Issues
 
----
+**"401 Unauthorized"**
+- Check API key is correct (no extra spaces)
+- Verify endpoint URL format
+- Ensure Azure subscription is active
 
-## Optional: Client Notifications
+**"Model not found"**
+- Verify deployment name in Azure AI Foundry
+- Check model is deployed and active
 
-Add SMS/email notification in `closeAndPersist()`:
+**No audio / Poor quality**
+- Verify Twilio webhook URL is correct
+- Check ngrok is running (for local dev)
+- Try different voice: `AZURE_VOICELIVE_VOICE=en-US-AvaNeural`
 
-1. Compose summary with links to:
-   - `transcript.json`
-   - `recording.wav`
+**WebSocket errors**
+- Endpoint should be `https://` (code converts to `wss://`)
+- Check firewall allows WebSocket connections
+- Review console logs for details
 
-2. Send to staff (Twilio SMS or SMTP via SendGrid)
+### Debug Logging
 
----
-
-## Scaling to Multi-Tenant
-
-Modify project config:
-
-```javascript
-const clients = {
-  mercyhouse: {
-    phone: "+1601XXX",
-    timezone: "America/Chicago",
-    businessNumber: "+1601YYY",
-    blobPrefix: "mercyhouse/"
-  }
-};
-```
-
-Route by Twilio number ("To" field).
+The server logs detailed information to console. Watch for:
+- Connection status
+- WebSocket events
+- Intake data extraction
+- Blob storage operations
 
 ---
 
-## Testing Checklist
+## 📈 Performance
 
-| Test | Expected |
-|------|----------|
-| Call during business hours | Forward to real phone |
-| Call after hours | Grace answers |
-| Grace speaks greeting | "Hi, this is Grace…" |
-| Conversation works | Real-time voice both ways |
-| Hang up | recording + transcript saved |
-| Blob Storage | has folder `/calls/<CallSid>` |
-| Optional alert | SMS/email received |
+- **Latency**: ~200-300ms (Azure Voice Live)
+- **Audio Quality**: HD 24kHz (downsampled to 8kHz for telephony)
+- **Concurrent Calls**: Limited by Azure quota
+- **Reliability**: 99.9% uptime (Azure SLA)
 
 ---
 
-## Grace System Prompt & Website Integration
+## 💰 Cost Estimation
 
-Grace's personality, tone, safety rules, and instructions are stored in code under `GRACE_PROMPT` (lines 69-121 in [server.js](server.js)).
+Approximate costs per minute of conversation:
 
-**Key Features:**
+- **Azure Voice Live**: ~$0.05-0.10/min
+- **Twilio Phone**: ~$0.01/min
+- **Azure Storage**: ~$0.0001/month/GB
 
-### Mercy House Website Scraping
-Grace automatically fetches content from these pages on each call:
-- https://mercyhouseatc.com/
-- https://mercyhouseatc.com/about/
-- https://mercyhouseatc.com/program/
-- https://mercyhouseatc.com/contact/
-
-This gives Grace real, up-to-date information to answer caller questions accurately.
-
-### Personality Traits
-- ✅ Warm, kind, and genuinely caring
-- ✅ Professional but conversational (never stiff)
-- ✅ Faith-aligned - appropriately mentions hope, prayer, and restoration
-- ✅ Human-like speech patterns ("hmm", "okay, I hear you", natural pauses)
-- ✅ Varied phrasing to avoid repetition
-
-### Structured Data Collection
-Grace uses a special **INTAKE:** format to output structured JSON:
-```
-INTAKE: {"name":"John Doe","phone":"+1601XXXXXXX","city":"Brandon","state":"MS","reason":"Asking about admission for a family member"}
-```
-
-This ensures reliable extraction of:
-- Caller's name
-- Phone number (auto-captured from Twilio + confirmed)
-- City and state
-- Short reason for calling
-
-### Safety Rules
-- ❌ No medical, legal, or professional counseling advice
-- 🚨 **Emergency protocol**: "This sounds like an emergency. Please hang up and call 911 right away."
-- ✅ Stays in lane as a receptionist
-- ✅ Never makes up information - says "let me have someone call you back" when uncertain
+*Check Azure and Twilio pricing for current rates.*
 
 ---
 
-## DONE — Grace Is Live
+## 🤝 Contributing
 
-You now have:
+Contributions welcome! Please:
 
-- ✅ A real, talking, human-sounding AI receptionist
-- ✅ Deployed on Azure
-- ✅ Answering Twilio calls
-- ✅ Storing recordings + transcripts to Blob
-- ✅ Ready for multiple clients
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
 ---
 
-## Support / Next Steps
+## 📄 License
 
-If you'd like, I can help you:
+[Add your license here]
 
-- ✅ Generate full `server.js` with business hours routing + alerts
-- ✅ Build a simple web dashboard to view calls
-- ✅ Package this as a SaaS for clients (Grace.ai or your brand)
+---
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/your-org/grace-ai-receptionist/issues)
+- **Documentation**: [docs/](docs/)
+
+---
+
+## 🙏 Acknowledgments
+
+- **Mercy House Adult & Teen Challenge** - For inspiring this project
+- **Azure Voice Live** - For exceptional voice quality
+- **Twilio** - For reliable telephony infrastructure
+- **OpenAI** - For pioneering realtime speech-to-speech
+
+---
+
+**Built with ❤️ for organizations making a difference.**
