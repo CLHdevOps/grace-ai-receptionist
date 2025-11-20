@@ -2,14 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const ExpressWs = require('express-ws');
 const { BlobServiceClient } = require('@azure/storage-blob');
-const OpenAI = require('openai');
 const WebSocket = require('ws');
 
 const app = express();
 ExpressWs(app);
 
 const PORT = process.env.PORT || 8080;
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); // reserved for future use
 
 /**
  * Key Mercy House URLs to pull context from.
@@ -70,15 +68,15 @@ const GRACE_PROMPT = `You are Grace, a warm, caring AI receptionist for Mercy Ho
 
 Your speaking style:
 - Speak in natural *spoken* English, not formal written English.
-- Use contractions (“I’m”, “we’re”, “don’t”) and everyday phrasing.
+- Use contractions ("I'm", "we're", "don't") and everyday phrasing.
 - Vary sentence length and cadence; avoid monotone or predictable patterns.
-- Add soft, natural pauses (“hmm,” “okay…,” “I hear you”) when appropriate.
+- Add soft, natural pauses ("hmm," "okay…," "I hear you") when appropriate.
 - Keep answers short, warm, and conversational.
 - Never sound stiff, scripted, or overly polished.
-- Use soft, natural vocal cues like: 
-  • [breath]  
-  • [pause 150ms]  
-  • [pause 300ms when thinking]  
+- Use soft, natural vocal cues like:
+  • [breath]
+  • [pause 150ms]
+  • [pause 300ms when thinking]
   • [soft chuckle] when appropriate
 - Do NOT overuse them; sprinkle them lightly and naturally.
 
@@ -86,23 +84,23 @@ Your speaking style:
 Your personality:
 - Kind, empathetic, and genuinely caring.
 - Calm, steady, and encouraging.
-- Faith-aligned; it’s okay to gently reference hope, prayer, or God’s ability to restore lives.
+- Faith-aligned; it's okay to gently reference hope, prayer, or God's ability to restore lives.
 - Professional but human—sound like a real receptionist, not a narrator.
 
 Your mission:
 - Greet callers warmly and make them feel safe.
 - Listen carefully, respond with empathy, and never rush them.
 - Answer questions using ONLY:
-  • What the caller tells you  
+  • What the caller tells you
   • Information provided from the Mercy House website (included in your system context)
 - If unsure, say something like:
-  “I’m not completely sure on that detail, but I can have someone from Mercy House call you back with a clear answer.”
+  "I'm not completely sure on that detail, but I can have someone from Mercy House call you back with a clear answer."
 - Your goal is to collect callback info for a real staff member to follow up.
 
 Information you MUST gather before ending the call:
-- Caller’s name  
-- Best phone number  
-- City and state  
+- Caller's name
+- Best phone number
+- City and state
 - Short reason for calling (help for self, help for loved one, donation, volunteering, etc.)
 
 Structured handoff requirement:
@@ -111,28 +109,28 @@ Once you have all four pieces of info, you must output exactly one line beginnin
 INTAKE: {JSON}
 
 Where {JSON} is a single-line JSON object with keys:
-- name  
-- phone  
-- city  
-- state  
-- reason  
+- name
+- phone
+- city
+- state
+- reason
 
-Example format (do NOT say “example” out loud):
+Example format (do NOT say "example" out loud):
 INTAKE: {"name":"John Doe","phone":"+1601XXXXXXX","city":"Brandon","state":"MS","reason":"Asking about admission for a family member"}
 
-Do NOT speak the word “INTAKE” to the caller. Continue the conversation naturally, but still send the machine-readable line.
+Do NOT speak the word "INTAKE" to the caller. Continue the conversation naturally, but still send the machine-readable line.
 
 How to talk:
 - Start with something like:
-  “Hi, this is Grace with Mercy House. I’m here to help. How are you doing today?”
-- Let callers finish their thoughts. Use gentle, empathetic backchanneling (“mm-hmm”, “I understand”).
+  "Hi, this is Grace with Mercy House. I'm here to help. How are you doing today?"
+- Let callers finish their thoughts. Use gentle, empathetic backchanneling ("mm-hmm", "I understand").
 - Guide the conversation toward the info you need without sounding like a form.
-- Use the caller’s name occasionally, not constantly.
+- Use the caller's name occasionally, not constantly.
 
 Safety:
 - Do NOT give medical, legal, or professional counseling.
 - If the caller seems in immediate danger:
-  “This sounds like an emergency. Please hang up and call 911 right now.”
+  "This sounds like an emergency. Please hang up and call 911 right now."
 - Stay in your lane: you listen, support, give basic info, and collect details for follow-up.
 
 Above all:
@@ -217,11 +215,11 @@ function updateIntakeFromText(text, intakeData) {
 
 // WebSocket endpoint for Twilio Media Stream
 app.ws('/media-stream', async (ws, req) => {
-  console.log('Media stream connected');
+  console.log('Media stream connected (Azure OpenAI version)');
 
   let callSid = null;
   let streamSid = null;
-  let openAiWs = null;
+  let azureOpenAiWs = null;
   let audioBuffer = [];
   let transcript = [];
   let intakeData = {
@@ -260,19 +258,27 @@ app.ws('/media-stream', async (ws, req) => {
             startTime: new Date(),
           });
 
-          // Connect to OpenAI Realtime API
-          openAiWs = new WebSocket(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
-            {
-              headers: {
-                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'realtime=v1',
-              },
-            }
-          );
+          // Build Azure OpenAI Realtime API WebSocket URL
+          // Format: wss://{your-resource-name}.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment={deployment-name}
+          const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT; // e.g., "https://your-resource.openai.azure.com"
+          const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT; // e.g., "gpt-4o-realtime"
+          const azureApiKey = process.env.AZURE_OPENAI_API_KEY;
 
-          openAiWs.on('open', async () => {
-            console.log('Connected to OpenAI Realtime API');
+          // Convert HTTPS endpoint to WSS
+          const wsEndpoint = azureEndpoint.replace('https://', 'wss://');
+          const realtimeUrl = `${wsEndpoint}/openai/realtime?api-version=2024-10-01-preview&deployment=${azureDeployment}`;
+
+          console.log(`Connecting to Azure OpenAI Realtime API: ${realtimeUrl}`);
+
+          // Connect to Azure OpenAI Realtime API
+          azureOpenAiWs = new WebSocket(realtimeUrl, {
+            headers: {
+              'api-key': azureApiKey,
+            },
+          });
+
+          azureOpenAiWs.on('open', async () => {
+            console.log('Connected to Azure OpenAI Realtime API');
 
             // Fetch Mercy House website content to give Grace real context
             const mercyContext = await fetchMercyHouseContent();
@@ -287,35 +293,36 @@ Do NOT read this text out loud or mention that you can "see the website".
 ${mercyContext}`;
 
             // Configure session for speech-to-speech
-openAiWs.send(
-  JSON.stringify({
-    type: "session.update",
-    session: {
-      modalities: ["text", "audio"],
-      instructions: fullInstructions,
+            azureOpenAiWs.send(
+              JSON.stringify({
+                type: "session.update",
+                session: {
+                  modalities: ["text", "audio"],
+                  instructions: fullInstructions,
 
-      // Voice selection
-      voice: "coral",
+                  // Voice selection - Azure OpenAI supports: alloy, echo, shimmer
+                  // Note: Azure may have different voice options than OpenAI
+                  voice: "alloy",
 
-      // Twilio codec
-      input_audio_format: "g711_ulaw",
-      output_audio_format: "g711_ulaw",
+                  // Twilio codec
+                  input_audio_format: "g711_ulaw",
+                  output_audio_format: "g711_ulaw",
 
-      // Natural turn-taking
-      turn_detection: {
-        type: "server_vad",
-        threshold: 0.42,
-        prefix_padding_ms: 250,
-        silence_duration_ms: 650
-      }
-    }
-  })
-);
+                  // Natural turn-taking
+                  turn_detection: {
+                    type: "server_vad",
+                    threshold: 0.42,
+                    prefix_padding_ms: 250,
+                    silence_duration_ms: 650
+                  }
+                }
+              })
+            );
 
             // Send an initial greeting request to Grace
             // This makes Grace speak first instead of waiting for the caller
             console.log('Requesting initial greeting from Grace');
-            openAiWs.send(
+            azureOpenAiWs.send(
               JSON.stringify({
                 type: 'response.create',
                 response: {
@@ -326,7 +333,7 @@ openAiWs.send(
             );
           });
 
-          openAiWs.on('message', (data) => {
+          azureOpenAiWs.on('message', (data) => {
             const response = JSON.parse(data);
 
             // Handle different OpenAI event types
@@ -364,7 +371,7 @@ openAiWs.send(
               }
 
               case 'error':
-                console.error('OpenAI error:', response.error);
+                console.error('Azure OpenAI error:', response.error);
                 break;
 
               default:
@@ -372,23 +379,23 @@ openAiWs.send(
             }
           });
 
-          openAiWs.on('error', (error) => {
-            console.error('OpenAI WebSocket error:', error);
+          azureOpenAiWs.on('error', (error) => {
+            console.error('Azure OpenAI WebSocket error:', error);
           });
 
-          openAiWs.on('close', () => {
-            console.log('OpenAI WebSocket closed');
+          azureOpenAiWs.on('close', () => {
+            console.log('Azure OpenAI WebSocket closed');
           });
 
           break;
         }
 
         case 'media':
-          // Forward audio to OpenAI
-          if (openAiWs && openAiWs.readyState === WebSocket.OPEN) {
+          // Forward audio to Azure OpenAI
+          if (azureOpenAiWs && azureOpenAiWs.readyState === WebSocket.OPEN) {
             audioBuffer.push(msg.media.payload);
 
-            openAiWs.send(
+            azureOpenAiWs.send(
               JSON.stringify({
                 type: 'input_audio_buffer.append',
                 audio: msg.media.payload,
@@ -400,9 +407,9 @@ openAiWs.send(
         case 'stop':
           console.log(`Stream stopped: ${streamSid}`);
 
-          // Close OpenAI connection
-          if (openAiWs) {
-            openAiWs.close();
+          // Close Azure OpenAI connection
+          if (azureOpenAiWs) {
+            azureOpenAiWs.close();
           }
 
           // Save call data to blob storage
@@ -423,8 +430,8 @@ openAiWs.send(
   ws.on('close', async () => {
     console.log('Twilio WebSocket closed');
 
-    if (openAiWs) {
-      openAiWs.close();
+    if (azureOpenAiWs) {
+      azureOpenAiWs.close();
     }
 
     if (callSid && sessions.has(callSid)) {
@@ -498,6 +505,6 @@ async function sendNotification(callSid, intakeData) {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Grace AI Receptionist server running on port ${PORT}`);
+  console.log(`Grace AI Receptionist server (Azure OpenAI version) running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/healthz`);
 });
