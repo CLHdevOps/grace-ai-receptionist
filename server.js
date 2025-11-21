@@ -295,7 +295,7 @@ openAiWs.send(
       instructions: fullInstructions,
 
       // Voice selection
-      voice: "coral",
+      voice: "cedar",
 
       // Twilio codec
       input_audio_format: "g711_ulaw",

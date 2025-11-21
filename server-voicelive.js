@@ -335,28 +335,31 @@ Do NOT read this text out loud or mention that you can "see the website".
 ${mercyContext}`;
 
                     // Determine voice configuration (Azure Neural Voice format)
-                    const voiceName = process.env.AZURE_VOICELIVE_VOICE || 'alloy';
+                    const voiceName = process.env.AZURE_VOICELIVE_VOICE || 'en-US-Ava:DragonHDLatestNeural';
+
+                    // Validate Azure neural voices
+                    const isAzureVoice =
+                      voiceName.startsWith('en-US-') &&
+                      voiceName.endsWith('Neural');
 
                     // Detect voice type based on name pattern
                     // HD voices end with "HDLatest" (e.g., EMMA2DragonHDLatest, PhoenixHDLatest)
                     // Standard voices follow pattern like "en-US-AvaNeural"
                     // OpenAI voices: alloy, echo, fable, onyx, nova, shimmer
                     let voiceConfig;
-                    if (voiceName.includes('HDLatest') || voiceName.includes('Neural')) {
-                      // Azure Neural Voice (HD or Standard)
+                    if (isAzureVoice) {
                       voiceConfig = {
                         type: 'azure-standard',
                         name: voiceName,
                         temperature: 0.8
                       };
                     } else {
-                      // OpenAI voice
+                      // Fallback to OpenAI voice names (alloy, onyx, etc.)
                       voiceConfig = {
                         type: 'openai',
                         name: voiceName
                       };
                     }
-
                     // Configure session for speech-to-speech with Azure Voice Live
                     const sessionUpdateMessage = {
                       type: 'session.update',
