@@ -69,10 +69,12 @@ const sessions = new Map();
 // Grace's system prompt
 const GRACE_PROMPT = `You are Grace, a warm, caring AI receptionist for Mercy House Adult & Teen Challenge in Mississippi.
 
-Important:
-- You must ALWAYS respond only in English.
-- Never use any other language, even for greetings or short phrases.
-- If a caller speaks another language, gently say you can only continue in English.
+CRITICAL LANGUAGE REQUIREMENT:
+- You MUST speak ONLY in English (en-US) at ALL times.
+- Your FIRST words when answering the phone MUST be in English.
+- NEVER greet callers in any language other than English.
+- NEVER use Portuguese, Spanish, or any other language - not even for a single word.
+- If a caller speaks another language, politely respond in English: "I'm sorry, I only speak English. Can we continue in English?"
 
 Your speaking style:
 - Speak in natural spoken English, not formal written English.
@@ -198,11 +200,19 @@ app.post('/voice', express.urlencoded({ extended: false }), (req, res) => {
  * Parse an "INTAKE: {json}" line from Grace into the intakeData object.
  */
 function updateIntakeFromText(text, intakeData) {
-  if (!text.startsWith('INTAKE:')) return;
+  // Check if text contains INTAKE: anywhere (not just at start)
+  if (!text.includes('INTAKE:')) return;
 
   try {
-    // Strip the "INTAKE:" prefix and trim
-    const jsonPart = text.slice('INTAKE:'.length).trim();
+    // Find the INTAKE: line in the text
+    const intakeIndex = text.indexOf('INTAKE:');
+    const afterIntake = text.slice(intakeIndex + 'INTAKE:'.length);
+
+    // Extract just the JSON part (first line after INTAKE:)
+    const lines = afterIntake.split('\n');
+    const jsonPart = lines[0].trim();
+
+    console.log('Attempting to parse INTAKE JSON:', jsonPart);
 
     // Parse JSON
     const parsed = JSON.parse(jsonPart);
@@ -214,9 +224,9 @@ function updateIntakeFromText(text, intakeData) {
     intakeData.state = parsed.state ?? intakeData.state;
     intakeData.reason = parsed.reason ?? intakeData.reason;
 
-    console.log('Updated intake data from INTAKE line:', intakeData);
+    console.log('✓ INTAKE DATA CAPTURED:', intakeData);
   } catch (err) {
-    console.error('Failed to parse INTAKE line:', err, 'Raw text:', text);
+    console.error('Failed to parse INTAKE line:', err, 'Raw text:', text.substring(0, 500));
   }
 }
 
@@ -411,7 +421,7 @@ ${mercyContext}`;
                         type: 'response.create',
                         response: {
                           modalities: ['text', 'audio'],
-                          instructions: 'Greet the caller warmly as instructed in your system prompt.',
+                          instructions: 'Greet the caller warmly IN ENGLISH ONLY as instructed in your system prompt. Your first words must be in English.',
                         },
                       })
                     );
@@ -489,6 +499,12 @@ ${mercyContext}`;
                 // Full transcript available
                 if (response.transcript) {
                   console.log('Grace full response:', response.transcript);
+
+                  // Check if this contains INTAKE data
+                  if (response.transcript.includes('INTAKE:')) {
+                    console.log('📋 Found INTAKE line in transcript!');
+                  }
+
                   transcript.push({
                     role: 'assistant',
                     text: response.transcript,
@@ -616,6 +632,7 @@ ${mercyContext}`;
 async function saveCallData(callSid, audioBuffer, transcript, intakeData) {
   try {
     console.log(`Saving call data for ${callSid}`);
+    console.log('Intake data being saved:', intakeData);
 
     const prefix = `calls/${callSid}/`;
 
@@ -630,6 +647,7 @@ async function saveCallData(callSid, audioBuffer, transcript, intakeData) {
 
     // Save intake data
     const intakeJson = JSON.stringify(intakeData, null, 2);
+    console.log('Intake JSON to be saved:', intakeJson);
     const intakeBlob = containerClient.getBlockBlobClient(`${prefix}intake.json`);
     await intakeBlob.upload(intakeJson, Buffer.byteLength(intakeJson), {
       blobHTTPHeaders: { blobContentType: 'application/json' },
